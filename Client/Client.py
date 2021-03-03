@@ -2,6 +2,7 @@ import time
 import math
 import threading
 import requests
+import urllib.parse
 import re
 
 from Helpers.Random import Random
@@ -26,6 +27,7 @@ class Client:
     def __init__(self, accInfo):
         self.guid = accInfo["guid"]
         self.password = accInfo["password"]
+        self.secret = accInfo["secret"]
         self.alias = accInfo["alias"]
         self.server = accInfo["server"]
         self.proxy = accInfo["proxy"]
@@ -36,11 +38,14 @@ class Client:
         self.random = Random()
         self.frameTimeUpdater = None
         self.active = True
+        self.isReady = False
         self.key = []
         self.keyTime = -1
         self.connectionGuid = ""
         self.gameId = GameId.nexus
-        self.buildVersion = "1.3.0.2.0"#TODO
+        self.buildVersion = "1.3.3.0.0"#TODO
+        self.clientToken = "dfcac55274cced4bcd41a12a45f0f775a48c5aba"
+        self.accessToken = ""
         self.playerData = PlayerData()
         self.charData = CharData()
         self.needsNewChar = False
@@ -55,16 +60,38 @@ class Client:
         self.sockMan.hook("ANY", self.onPacket)
         self.anyPacket = None
         
-        self.sockMan.hook("MAPINFO", self.onMapInfo)
+        self.sockMan.hook("CREATESUCCESS", self.onCreateSuccess)
+        self.sockMan.hook("ENEMYSHOOT", self.onEnemyShoot)
         self.sockMan.hook("FAILURE", self.onFailure)
+        self.sockMan.hook("GOTO", self.onGoto)
+        self.sockMan.hook("MAPINFO", self.onMapInfo)
+        self.sockMan.hook("NEWTICK", self.onNewTick)
         self.sockMan.hook("PING", self.onPing)
         self.sockMan.hook("UPDATE", self.onUpdate)
-        self.sockMan.hook("CREATESUCCESS", self.onCreateSuccess)
-        self.sockMan.hook("NEWTICK", self.onNewTick)
-        self.sockMan.hook("GOTO", self.onGoto)
         self.sockMan.hook("RECONNECT", self.onReconnect)
+        self.sockMan.hook("SERVERPLAYERSHOOT", self.onServerPlayerShoot)
 
-        r = requests.get(ApiPoints.CHAR.format(self.guid, self.password), headers=ApiPoints.exaltHeaders)
+        print("Getting token...")
+        #Get access token
+        r = requests.get(ApiPoints.VERIFY.format(self.guid, self.password, self.clientToken), headers=ApiPoints.exaltHeaders)
+        pattern = r"AccessToken>(.+)</AccessToken>"
+        try:
+            self.accessToken = re.findall(pattern, r.text)[0]
+        except IndexError:#Token not working
+            print("GETTING TOKEN ERROR:", r.text)
+            self.active = False
+            return
+        
+        #Verify token
+        r = requests.get(ApiPoints.VERIFYTOKEN.format(self.clientToken, urllib.parse.quote_plus(self.accessToken)), headers=ApiPoints.exaltHeaders)
+        if not "Success" in r.text:
+            print("VERIFYING TOKEN ERROR:", r.text)
+            self.active = False
+            return
+
+        #Get char data
+        r = requests.get(ApiPoints.CHAR.format(urllib.parse.quote_plus(self.accessToken)), headers=ApiPoints.exaltHeaders)
+        
         while "Account in use" in r.text:
             print(self.guid, "has account in use")
             try:
@@ -75,12 +102,14 @@ class Client:
                 r = requests.get(ApiPoints.CHAR.format(self.guid, self.password))
         if "Account credentials not valid" in r.text:
             print(self.guid, "got invalid credentials")
+            self.active = False
             return
         try:
             charInfo = re.findall(r'<Chars nextCharId="(\d+)" maxNumChars="(\d+)">', r.text)[0]
             chars = re.findall(r'<Char id="(\d+)">', r.text)
         except IndexError:
             print(r.text)
+            self.active = False
             return
         self.charData.nextCharId = int(charInfo[0])
         self.charData.maxNumChars = int(charInfo[1])
@@ -92,7 +121,8 @@ class Client:
             self.charData.currentCharId = self.charData.nextCharId
             self.charData.nextCharId += 1
             self.needsNewChar = True
-        
+            
+        self.isReady = True
         self.connect()
 
     def isConnected(self):
@@ -103,7 +133,7 @@ class Client:
             self.sockMan.disconnect()
         if not self.frameTimeUpdater is None:
             self.frameTimeUpdater.cancel()
-        self.sockMan.connect(self.proxy, self.nexusServer["host"])
+        self.sockMan.connect(self.proxy, self.internalServer["host"])
         self.sendHelloPacket()
 
     def changeServer(self, server):
@@ -128,19 +158,20 @@ class Client:
     def nexus(self):
         packet = PacketHelper.CreatePacket("ESCAPE")
         self.send(packet)
+        self.gameId = GameId.nexus
+        self.key = []
+        self.keyTime = -1
 
     def sendHelloPacket(self):
         hello_packet = PacketHelper.CreatePacket("HELLO")
         hello_packet.buildVersion = self.buildVersion
         hello_packet.gameId = self.gameId
-        hello_packet.guid = RSA.encrypt(self.guid)
-        hello_packet.password = RSA.encrypt(self.password)
-        hello_packet.secret = RSA.encrypt("")#To match what normal exalt sends
+        hello_packet.accessToken = self.accessToken
         hello_packet.keyTime = self.keyTime
         hello_packet.key = self.key
         hello_packet.gameNet = "rotmg"
         hello_packet.playPlatform = "rotmg"
-        hello_packet.previousConnectionGuid = self.connectionGuid
+        hello_packet.userToken = self.clientToken
         self.send(hello_packet)
 
     def send(self, packet):
@@ -266,7 +297,6 @@ class Client:
             load_packet = PacketHelper.CreatePacket("LOAD")
             load_packet.charId = self.charData.currentCharId
             self.send(load_packet)
-        self.connectionGuid = packet.connectionGuid
         self.random.setSeed(packet.fp)
 
     def onFailure(self, packet):
@@ -275,7 +305,7 @@ class Client:
         if packet.errorDescription == "server.update_client":
             self.disconnect()
         elif packet.errorDescription == "Account credentials not valid":
-            self.disconnect()
+            self.disconnect()            
         
     def onPing(self, packet):
         pong_packet = PacketHelper.CreatePacket("PONG")
@@ -302,6 +332,17 @@ class Client:
             if obj.status.objectId == self.objectId:
                 self.pos = obj.status.pos
                 self.playerData.parse(obj)
+
+    def onServerPlayerShoot(self, packet):
+        if packet.ownerId == self.objectId:
+            shootAck = PacketHelper.CreatePacket("SHOOTACK")
+            shootAck.time = self.lastFrameTime
+            self.send(shootAck)
+
+    def onEnemyShoot(self, packet):
+        shootAck = PacketHelper.CreatePacket("SHOOTACK")
+        shootAck.time = self.lastFrameTime
+        self.send(shootAck)
 
     def onReconnect(self, packet):
         if packet.host != "":

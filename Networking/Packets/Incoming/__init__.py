@@ -1,6 +1,7 @@
 from .AccountListPacket import *
 from .AllyShootPacket import *
 from .AoePacket import *
+from .BlueprintInfoPacket import *
 from .BuyResultPacket import *
 from .ClaimDailyRewardResponsePacket import *
 from .ClientStatPacket import *
@@ -11,6 +12,7 @@ from .EnemyShootPacket import *
 from .ExaltationUpdatePacket import *
 from .FailurePacket import *
 from .FilePacket import *
+from .ForgeResponsePacket import *
 from .GlobalNotificationPacket import *
 from .GotoPacket import *
 from .GuildResultPacket import *

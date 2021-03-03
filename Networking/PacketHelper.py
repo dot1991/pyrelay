@@ -40,6 +40,8 @@ def CreatePacket(packet_type):
         return outgoing.EnemyHitPacket()
     if packet_type == types.ESCAPE:
         return outgoing.EscapePacket()
+    if packet_type == types.FORGEREQUEST:
+        return outgoing.ForgeRequestPacket()
     if packet_type == types.GOTOACK:
         return outgoing.GotoAckPacket()
     if packet_type == types.GOTOQUESTROOM:
@@ -100,6 +102,8 @@ def CreatePacket(packet_type):
         return incoming.AllyShootPacket()
     if packet_type == types.AOE:
         return incoming.AoePacket()
+    if packet_type == types.BLUEPRINTINFO:
+        return incoming.BlueprintInfoPacket()
     if packet_type == types.BUYRESULT:
         return incoming.BuyResultPacket()
     if packet_type == types.CLAIMDAILYREWARDRESPONSE:
@@ -120,6 +124,8 @@ def CreatePacket(packet_type):
         return incoming.FailurePacket()
     if packet_type == types.FILE:
         return incoming.FilePacket()
+    if packet_type == types.FORGERESPONSE:
+        return incoming.ForgeResponsePacket()
     if packet_type == types.GLOBALNOTIFICATION:
         return incoming.GlobalNotificationPacket()
     if packet_type == types.GOTO:
