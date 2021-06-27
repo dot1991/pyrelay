@@ -1,11 +1,21 @@
 class NotificationPacket:
     def __init__(self):
         self.type = "NOTIFICATION"
-        self.objectId = 0
+        self.unknown1 = 0
+        self.unknown2 = 0
         self.message = ""
-        self.color = 0
+        self.unknowns = []
 
     def read(self, reader):
-        self.objectId = reader.readInt32()
+        self.unknown1 = reader.readByte()
+        self.unknown2 = reader.readByte()
         self.message = reader.readStr()
-        self.color = reader.readInt32()
+        while reader.bytesAvailable() > 0:
+            self.unknowns.append(reader.readByte())
+
+    def write(self, writer):
+        writer.writeByte(self.unknown1)
+        writer.writeByte(self.unknown2)
+        writer.writeStr(self.message)
+        for byte in self.unknowns:
+            writer.writeByte(byte)
